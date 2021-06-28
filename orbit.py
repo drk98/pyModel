@@ -3,6 +3,37 @@ import scipy.optimize as optimize
 import astropy.units as u
 import astropy.constants as const
 
+mu = 1.32712410041e20 * u.m ** 3 / u.s ** 2
+
+
+def rotation_matrix(theta, axis):
+    c = np.cos(theta)
+    s = np.sin(theta)
+
+    if axis == 'x':
+        return np.array([[1, 0, 0],
+                         [0, c, -s],
+                         [0, s, c]])
+    elif axis == 'y':
+        return np.array([[c, 0, s],
+                         [0, 1, 0],
+                         [-s, 0, c]])
+    elif axis == 'z':
+        return np.array([[c, -s, 0],
+                         [s, c, 0],
+                         [0, 0, 1]])
+    return None
+
+
+def rm(theta, axis):
+    """
+    Alias for rotation_matrix
+    :param theta: The angle to rotate
+    :param axis: The axis to rotate on
+    :return: The 3x3 rotation matrix
+    """
+    return rotation_matrix(theta, axis)
+
 
 class Orbit(object):
 
@@ -34,6 +65,8 @@ class Orbit(object):
         self.T: float = T.to(u.s)
         self.n = n.to(u.deg / u.day)
 
+        self.rotaion_factor = rm(-self.rightAscNode, 'z') @ rm(-self.i, 'x') @ rm(-self.omega, 'z')
+
     @property
     def period(self) -> u.day:
         """
@@ -44,18 +77,33 @@ class Orbit(object):
 
     @property
     def specificAngularMomentum(self) -> u.m ** 2 / u.s:
+        """
+        Calculates the specific angular momentum for the object
+        :return: The specific angular momentum
+        """
         mu = self.n.to(u.deg / u.s) ** 2 * self.a.to(u.m) ** 3
         mu = mu.value * u.m ** 3 / u.s ** 2
         return np.sqrt(mu * self.a.to(u.m) * (1 - self.e ** 2))
 
     @u.quantity_input
     def _calcMeanAnomaly(self, t: u.s) -> u.deg:
+        """
+        Calculates the mean anomaly at time t
+        :param t: The time to calculate the mean anomaly
+        :return: The mean anomaly
+        """
         t = t.to(u.day)
 
         return self.n * ((t - self.T.to(u.day)) % self.period.to(u.day))
 
     @u.quantity_input
     def _calcEccentricAnomaly(self, t: u.s = None, meanAnomaly: u.deg = None) -> u.deg:
+        """
+        Calculates the eccentic anomaly at time t
+        :param t: The time to calculate the eccentic anomaly
+        :param meanAnomaly: The mean anomaly at time t
+        :return: the eccentic anomaly at time t (not needed if mean anomaly is provided)
+        """
 
         if meanAnomaly is None:
             meanAnomaly = self._calcMeanAnomaly(t)
@@ -63,17 +111,24 @@ class Orbit(object):
         deriv = lambda ea: 1 + self.e * np.cos(ea)
         return optimize.newton(conv, meanAnomaly.value, fprime=deriv) * u.deg
 
-        #return optimize.newton(conv, meanAnomaly.value) * u.deg
 
     @u.quantity_input
     def _calcTrueAnomaly(self, t: u.s = None, eccenticAnomaly: u.deg = None, meanAnomaly: u.deg = None) -> u.deg:
 
         if eccenticAnomaly is None:
             eccenticAnomaly = self._calcEccentricAnomaly(t, meanAnomaly=meanAnomaly)
-        return 2 * np.arctan2(np.sqrt(1+self.e)*np.sin(eccenticAnomaly/2), np.sqrt(1-self.e)*np.cos(eccenticAnomaly/2))
+        return 2 * np.arctan2(np.sqrt(1 + self.e) * np.sin(eccenticAnomaly / 2),
+                              np.sqrt(1 - self.e) * np.cos(eccenticAnomaly / 2))
 
     @u.quantity_input
     def _calcRadius(self, t: u.s = None, eccenticAnomaly: u.deg = None, meanAnomaly: u.deg = None) -> u.m:
+        """
+        Calculate the distance from the central body to the object
+        :param t: The time to calculate the radius (not needed if eccenticAnomaly is provided)
+        :param eccenticAnomaly: The eccentric anomaly at time t
+        :param meanAnomaly: The mean anomaly at time t (not needed if eccenticAnomaly is provided)
+        :return: The radius at time t
+        """
 
         if eccenticAnomaly is None:
             eccenticAnomaly = self._calcEccentricAnomaly(t, meanAnomaly=meanAnomaly)
@@ -82,100 +137,58 @@ class Orbit(object):
 
     @u.quantity_input
     def calcCartesianCoords(self, t: u.s) -> u.m:
+        """
+        Using equation 9 from https://downloads.rene-schwarz.com/download/M001-Keplerian_Orbit_Elements_to_Cartesian_State_Vectors.pdf
+        :param t: The time when the position is wanted
+        :return: The xyz position vector
+        """
 
         ma = self._calcMeanAnomaly(t)
         ea = self._calcEccentricAnomaly(meanAnomaly=ma)
         v = self._calcTrueAnomaly(eccenticAnomaly=ea)
         r = self._calcRadius(eccenticAnomaly=ea)
 
-        x = r * (np.cos(self.rightAscNode) * np.cos(self.omega + v) - np.sin(
-            self.rightAscNode) * np.sin(self.omega + v) * np.cos(self.i))
-        y = r * (np.sin(self.rightAscNode) * np.cos(self.omega + v) + np.cos(
-            self.rightAscNode) * np.sin(self.omega + v) * np.cos(self.i))
-        z = r * (np.sin(self.i) * np.sin(self.omega + v))
-        return [x, y, z] * u.m
+        o_t = r * np.array([[np.cos(v)],
+                            [np.sin(v)],
+                            [0]])
+
+        dist = self.rotaion_factor @ o_t
+
+        return dist.T[0]
 
     @u.quantity_input
     def calcCartesianVelocities(self, t: u.s) -> u.m / u.s:
+        """
+        Using equation 10 from https://downloads.rene-schwarz.com/download/M001-Keplerian_Orbit_Elements_to_Cartesian_State_Vectors.pdf
+        :param t: The time at the velocity of the body is wanted
+        :return: the xyz velocity vector
+        """
+
         ma = self._calcMeanAnomaly(t)
         ea = self._calcEccentricAnomaly(meanAnomaly=ma)
         v = self._calcTrueAnomaly(eccenticAnomaly=ea)
         r = self._calcRadius(eccenticAnomaly=ea).to(u.m)
 
-        print(f"{ma=}")
-        print(f"{ea=}")
-        print(f"{v=}")
-        print(f"{r=}")
-        h = self.specificAngularMomentum
-        p = self.a * (1 - self.e ** 2)
-        # p = self.a*2*np.pi
-        x, y, z = self.calcCartesianCoords(t).to(u.m)
-        print(f"{p=}")
-        print(f"{h=}")
-        v_X = x * h * self.e / (r * p) * np.sin(v)
-        v_X = v_X - (h / r) * (np.cos(self.rightAscNode) * np.sin(self.omega + v) + np.sin(self.rightAscNode) * np.cos(
-            self.omega + v) * np.cos(self.i))
+        odot_t = np.sqrt(mu * self.a) / r * np.array([[-np.sin(ea)],
+                                                      [np.sqrt(1 - self.e ** 2) * np.cos(ea)],
+                                                      [0]])
+        r_dot = self.rotaion_factor @ odot_t
 
-        v_Y = y * h * self.e / (r * p) * np.sin(v)
-        v_Y = v_Y - (h / r) * (np.sin(self.rightAscNode) * np.sin(self.omega + v) + np.cos(self.rightAscNode) * np.cos(
-            self.omega + v) * np.cos(self.i))
-
-        v_Z = z * h * self.e / (r * p) * np.sin(v)
-        v_Z = v_Z + (h / r) * np.sin(self.i) * np.cos(self.omega + v)
-
-        return [v_X, v_Y, v_Z] * (u.m / u.s)
+        return r_dot.T[0]
 
     @u.quantity_input
     def calcECFCoords(self, t: u.s) -> u.m:
+        """
+        Calculate the cartesian coordinates of the object in the Earth Centered and Fixed (ECF) system
+        :param t: The time the coordinates are wanted
+        :return: The xyz vector in ECF
+        """
 
-        vx, vy, vz = self.calcCartesianVelocities(t)
-        x, y, z = self.calcCartesianCoords(t)
+        earth = Orbit(1.00000011 * u.AU, 0.01671022, 0.00005 * u.deg, 102.94719 * u.deg, -11.26064 * u.deg, 0 * u.s,
+                      (360 / 365.2568983840419) * u.deg / u.day)
 
-        greenwichHA = 0
-        T = np.matrix([[np.cos(greenwichHA), np.sin(greenwichHA), 0],
-                       [-np.sin(greenwichHA), np.cos(greenwichHA), 0],
-                       [0, 0, 1]])
-        earthRotRate = 7.2921158553e-5 / u.s
-        tmp = np.matrix([[(vx + earthRotRate * y).value],
-                         [(vy - earthRotRate * x).value],  # Check the equation of row
-                         [vz.value]])
+        earth_coords = earth.calcCartesianCoords(t)
+        this_coords = self.calcCartesianCoords(t)
 
-        return T * tmp * u.m
+        return this_coords - earth_coords
 
-
-earth = Orbit(1 * u.AU, 0.01671022, 0.00005 * u.deg, 102.94719 * u.deg, -11.26064 * u.deg, 0 * u.s,
-              (360 / 365.2568983840419) * u.deg / u.day)
-print(earth.period)
-print(earth.specificAngularMomentum)
-coords = earth.calcCartesianCoords((2459391.9905 - 2451545) * u.day)
-velos = earth.calcCartesianVelocities((2459391.9905 - 2451545 ) * u.day)
-# velos = earth.calcCartesianVelocities(3 * u.day)
-# coords = earth.calcCartesianCoords(3* u.day)
-print(velos.to(u.km / u.s))
-print(coords.to(u.AU))
-print(np.linalg.norm(coords).to(u.AU))
-print(np.linalg.norm(velos).to(u.km / u.s))
-# print(earth.calcECFCoords(0*u.day))
-exit()
-days = np.linspace(0, 365)
-vx = []
-vy = []
-vz = []
-v = []
-for d in np.linspace(0, 365):
-    velos = earth.calcCartesianVelocities(d * u.day)
-    vx.append(velos[0].to(u.km / u.s).value)
-    vy.append(velos[1].to(u.km / u.s).value)
-    vz.append(velos[2].to(u.km / u.s).value)
-    # print(np.sqrt(sum([v ** 2 for v in velos])).to(u.km/u.s))
-    v.append(np.sqrt(sum([vs ** 2 for vs in velos])).to(u.km / u.s).value)
-# velos = np.array(velos)
-# print(velos)
-import matplotlib.pyplot as plt
-
-# plt.plot(days, vx)
-# plt.plot(days, vy)
-# plt.plot(days, vz)
-plt.plot(days, v)
-plt.hlines(29.78, xmin=0, xmax=365)
-# plt.show()
