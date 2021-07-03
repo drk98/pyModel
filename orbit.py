@@ -39,7 +39,7 @@ class Orbit(object):
 
     @u.quantity_input
     def __init__(self, a: u.m, e: float, i: u.deg, omega: u.deg, rightAscNode: u.deg,
-                 T: u.day, n: u.deg / u.day):
+                 n: u.deg / u.day, T: u.day):
         """
 
         :param a: The semimajor axis.
@@ -184,8 +184,8 @@ class Orbit(object):
         :return: The xyz vector in ECF
         """
 
-        earth = Orbit(1.00000011 * u.AU, 0.01671022, 0.00005 * u.deg, 102.94719 * u.deg, -11.26064 * u.deg, 0 * u.s,
-                      (360 / 365.2568983840419) * u.deg / u.day)
+        earth = Orbit(1.00000011 * u.AU, 0.01671022, 0.00005 * u.deg, 102.94719 * u.deg, -11.26064 * u.deg,
+                      0.9856076684456904 * u.deg / u.day, 0 * u.s)
 
         earth_coords = earth.calcCartesianCoords(t)
         this_coords = self.calcCartesianCoords(t)
