@@ -38,16 +38,16 @@ def rm(theta, axis):
 class Orbit(object):
 
     @u.quantity_input
-    def __init__(self, a: u.m, e: float, i: u.deg, omega: u.deg, rightAscNode: u.deg,
-                 n: u.deg / u.day, T: u.day):
+    def __init__(self, a: u.m, e: float, i: u.deg, peri: u.deg, node: u.deg,
+                 n: u.deg / u.day, epoch: u.day, m: u.deg):
         """
 
         :param a: The semimajor axis.
         :param e: The eccentricity
         :param i: The inclination.
-        :param omega: The XXXX.
-        :param rightAscNode:
-        :param T: The epoch time.
+        :param peri: The argument of periapsis.
+        :param node:
+        :param epoch: The epoch time.
         :param n: The mean daily motion
         """
 
@@ -60,10 +60,11 @@ class Orbit(object):
         self.a: float = a.to(u.meter)
         self.e: float = e
         self.i: float = i.to(u.deg)
-        self.omega: float = omega.to(u.deg)
-        self.rightAscNode: float = rightAscNode.to(u.deg)
-        self.T: float = T.to(u.s)
+        self.omega: float = peri.to(u.deg)
+        self.rightAscNode: float = node.to(u.deg)
+        self.T: float = epoch.to(u.s)
         self.n = n.to(u.deg / u.day)
+        self.M = m.to(u.deg)
 
         self.rotaion_factor = rm(-self.rightAscNode, 'z') @ rm(-self.i, 'x') @ rm(-self.omega, 'z')
 
@@ -92,9 +93,17 @@ class Orbit(object):
         :param t: The time to calculate the mean anomaly
         :return: The mean anomaly
         """
-        t = t.to(u.day)
+        t = t.to(u.s)
+        M = self.M + self.n * ((t - self.T.to(u.day)) % self.period.to(u.day))
+        M = M % (360 * u.deg)
+        return M
+        print(M)
+        mu = 1.32712440041e20 * u.m ** 3 / u.s ** 2
+        M= (self.M.to(u.rad) + 86400 * ((t.to(u.s) - self.T.to(u.s)) % self.period.to(u.s)) * np.sqrt(
+            mu / self.a.to(u.m) ** 3) * u.rad).to(u.deg)
+        print(M%(360 * u.deg))
 
-        return self.n * ((t - self.T.to(u.day)) % self.period.to(u.day))
+
 
     @u.quantity_input
     def _calcEccentricAnomaly(self, t: u.s = None, meanAnomaly: u.deg = None) -> u.deg:
@@ -108,9 +117,8 @@ class Orbit(object):
         if meanAnomaly is None:
             meanAnomaly = self._calcMeanAnomaly(t)
         conv = lambda ea: ea - (self.e * np.sin(ea)) - meanAnomaly.value
-        deriv = lambda ea: 1 + self.e * np.cos(ea)
+        deriv = lambda ea: 1 - self.e * np.cos(ea)
         return optimize.newton(conv, meanAnomaly.value, fprime=deriv) * u.deg
-
 
     @u.quantity_input
     def _calcTrueAnomaly(self, t: u.s = None, eccenticAnomaly: u.deg = None, meanAnomaly: u.deg = None) -> u.deg:
@@ -185,10 +193,14 @@ class Orbit(object):
         """
 
         earth = Orbit(1.00000011 * u.AU, 0.01671022, 0.00005 * u.deg, 102.94719 * u.deg, -11.26064 * u.deg,
-                      0.9856076684456904 * u.deg / u.day, 0 * u.s)
+                      0.9856076684456904 * u.deg / u.day, 2451545.0 * u.d, 191.458049 * u.deg)
 
         earth_coords = earth.calcCartesianCoords(t)
         this_coords = self.calcCartesianCoords(t)
 
         return this_coords - earth_coords
 
+
+#import ephemeridesGetter
+#mpc = ephemeridesGetter.MPC(file="mpcorb_extended.json")
+#obj = Orbit(**mpc.getEphemerides("123"))

@@ -29,7 +29,7 @@ class MPC():
     def getEphemerides(self, key) -> tuple:
         obj = self[key]
         eph = tuple(obj[orbitEphNeeded])
-        toReturn = []
-        for ele, unit in zip(eph, ephUnits):
-            toReturn.append(ele*unit)
-        return tuple(toReturn)
+        toReturn = {}
+        for ele, unit in zip(orbitEphNeeded, ephUnits):
+            toReturn[ele.lower()] =obj[ele]*unit
+        return toReturn
