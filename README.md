@@ -1,6 +1,6 @@
 # pyModel
 
-A python wrapper for light curve inversion using [insert link]
+A python wrapper for light curve inversion using https://astro.troja.mff.cuni.cz/projects/damit/pages/software_download
 
 Usage:
 
